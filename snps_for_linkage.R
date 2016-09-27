@@ -17,14 +17,6 @@ suppressMessages(suppressWarnings(suppressPackageStartupMessages(library(paralle
 m <- as.data.frame(fread('EVA18942.map',header=FALSE))
 colnames(m) <- c('chr','snp','cm', 'pos')
 
-
-
-# b) only SNPs with rs numbers
-
-
-# d) snps at an interval of 0.1cm
-
-
 # a) only keep polymorphic SNPs with no missingness
 d <- read('t-EVA18942.traw')
 rownames(d) <- d$SNP
@@ -65,50 +57,37 @@ ok <- mclapply(1:nrow(X), function(i) {
 ok <- as.logical(unlist(ok))
 d <- d[ok,]
 
-selected.variants <- rownames(d) 
-d <- as.data.frame(fread('clean3.map',header=FALSE))
-colnames(d) <- c('chr','snp','cm','pos')
-d <- d[grep('^rs', d$snp),]
-rownames(d) <- d$snp 
-length(selected.variants <- intersect(selected.variants,rownames(d))) 
-d <- d[selected.variants,]
+# c) only SNPs with rs numbers
+d <- d[ grep('^rs', d$SNP) ,]
+rownames(d) <- d$SNP 
+
+
+# write the map, dat and ped files
 
 print('map files')
 snps <- list()
 for (chr in seq(1,22)) {
     print(chr)
-    print(nrow(x <- d[which(d$chr==chr),]))
-    x$cm <- x$cm-min(x$cm)
-    print(nrow(x <- x[!duplicated(round(x$cm,0)),]))
+    print(nrow(x <- d[which(d$CHR==chr),]))
+    x[,'(C)M'] <- x[,'(C)M']-min(x[,'(C)M'])
+    #print(nrow(x <- x[!duplicated(round(x[,'(C)M'],0)),]))
     snps[[chr]] <- x
-    write.table(snps[[chr]][,c('chr','snp','cm')],file=sprintf('clean_%s.map',chr),row.name=FALSE,quote=FALSE,sep='\t',col.name=FALSE)
+    write.table(snps[[chr]][,c('CHR','SNP','(C)M')],file=sprintf('merlin_%s.map',chr),row.name=FALSE,quote=FALSE,sep='\t',col.name=FALSE)
 }
 
 print('dat files')
 for (chr in seq(1,22)) {
     print(chr)
-    x <- data.frame(A='M',Analysis=snps[[chr]]$snp)
+    x <- data.frame(A='M',Analysis=snps[[chr]]$SNP)
     print(nrow(x))
-    write.table(x,file=sprintf('clean_%s.dat',chr),row.name=FALSE,quote=FALSE,sep='\t')
-    write.table(x$Analysis,file=sprintf('clean_%s.txt',chr),row.name=FALSE,quote=FALSE,sep='\t',col.name=FALSE)
+    write.table(x,file=sprintf('merlin_%s.dat',chr),row.name=FALSE,quote=FALSE,sep='\t')
+    write.table(x$Analysis,file=sprintf('merlin_%s.txt',chr),row.name=FALSE,quote=FALSE,sep='\t',col.name=FALSE)
 }
 
+print('ped files')
 for (chr in seq(1,22)) {
-    print(system(sprintf('plink  --file linkage/final --extract clean_%s.txt --recode --out merlin_%s', chr, chr, chr)))
+    print(system(sprintf('plink  --file EVA18942 --extract merlin_%s.txt --recode --out merlin_%s', chr, chr, chr)))
 }
-
-# add WGS data
-for (chr in seq(1,22)) {
-    print(system(sprintf('Rscript wgs_to_ped.R --sample %s --chr %s','JW15',chr)))
-}
-
-# run merlin
-for (chr in seq(1,22)) {
-cmd <- "merlin -p merlin_%s.ped -d  clean_%s.dat -m clean_%s.map --npl --exp --bits 28 --megabytes 9999 --tabulate --markerNames > chr%s.results"
-system(sprintf(cmd,chr,chr,chr,chr))
-
-}
-
 
 
 
