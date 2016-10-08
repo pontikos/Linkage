@@ -6,7 +6,8 @@ suppressPackageStartupMessages(library(kinship2))
 option_list <- list(
     make_option(c('--chr'), default='22', help=''),
     make_option(c('--linkage.markers'),  help='Markers to use for linkage.  Finding the right marker for Merlin is key. Ideally keep SNPs genotyped in all individuals and that recombine.'),
-    make_options(c('--base.dir'),  help='Base dir'),
+    make_option(c('--cm.step'), help='Centimorgan step.'),
+    make_option(c('--base.dir'),  help='Base dir'),
     make_option(c('--trim'), default='', help='Comma separated list of indviduals to remove from pedigree. Descendants and spouses are also removed.'),
     make_option(c('--skip'), default='', help='Comma separated list of indviduals to skip from pedigree. Their spouse is removed and their descendants are directly linked to their parents.')
 )
@@ -19,29 +20,32 @@ trim <- unlist(strsplit(opt$trim,','))
 skip <- unlist(strsplit(opt$skip,','))
 linkage.markers.file <- opt$linkage.markers
 base.dir <- opt$base.dir
+cm.step <- opt$cm.step
 
-
-#output files for merlin
+#files required by merlin
 #merlin_%s.ped
 #merlin_%s.dat
 #merlin_%s.map
 
-# Actually here just use the exome markers, let's see if they are any good
-#linkage.markers <- file.path(base.dir, 'chip.exome.snps.csv')
 linkage.markers <- read(linkage.markers.file)
 colnames(linkage.markers) <- c('chr','snp','cm', 'pos')
-
 
 # markers
 # only keep linkage markers in chr
 linkage.markers <- linkage.markers[which(linkage.markers$chr==chr),]
-(nrow(map <- linkage.markers))
+print(nrow(map <- linkage.markers))
 rownames(map) <- map[,'snp']
 #x$cm <- x$cm-min(x$cm)
 #print(nrow(x <- x[!duplicated(round(x$cm,0)),]))
 
+linkage.markers$cm <- round(linkage.markers$cm-min(linkage.markers$cm),6)
+
+if (!is.null(cm.step)) {
+    print(nrow(linkage.markers <- linkage.markers[!duplicated(round(linkage.markers$cm,-log10(as.numeric(cm.step)))),]))
+}
+
 # remove individuals which are trimmed/skipped from pedigree
-pedigree <- read.table(file.path(base.dir,'pedigree/seq-ped.csv'),header=FALSE)
+pedigree <- read.table(file.path(base.dir,'pedigree','seq-ped.csv'),header=FALSE,colClasses='character')
 colnames(pedigree) <- c('family','ID','Father','Mother','Gender','Affection')
 rownames(pedigree) <- pedigree$ID
 # individuals to trim from pedigree
@@ -61,32 +65,33 @@ if (length(skip)>0) {
 
 #
 print('write plink extract file')
-extract.file <- file.path(base.dir,'genotypes',sprintf('clean_%s.txt',chr))
+extract.file <- file.path(base.dir,'all',sprintf('clean_%s.txt',chr))
 print(extract.file)
 write.table(linkage.markers$snp,file=extract.file,row.name=FALSE,quote=FALSE,col.name=FALSE)
 
 print('extract markers for genotypes')
-print(system(sprintf('plink  --file %s --extract %s --recode --out %s', file.path(base.dir,'genotypes','final'), extract.file, file.path(base.dir,'genotypes',sprintf('merlin_%s',chr)))))
+print(system(sprintf('plink  --file %s --extract %s --recode --out %s', file.path(base.dir,'all','EVA18942'), extract.file, file.path(base.dir,'all',sprintf('merlin_%s',chr)))))
 
 # some markers might have been lost on extraction, need to rewrite file
-print('map file')
-map.file <- file.path(base.dir,'genotypes',sprintf('merlin_%s.map',chr))
+print('merlin map file')
+map.file <- file.path(base.dir,'all',sprintf('merlin_%s.map',chr))
 print(map.file)
-m <- read.table(map.file,header=FALSE)
+m <- read.table(map.file,header=FALSE,colClasses='character')
 colnames(m) <- c('chr','snp','pos','cm')
+#colnames(m) <- c('chr','snp','cm')
 print(dim(map))
 print(dim(map <- map[m$snp,]))
 write.table(map[,c('chr','snp','cm')],file=map.file,row.name=FALSE,quote=FALSE,sep='\t',col.name=FALSE)
 
 print('merlin dat file')
-dat.file <- file.path(base.dir,'genotypes',sprintf('merlin_%s.dat',chr))
+dat.file <- file.path(base.dir,'all',sprintf('merlin_%s.dat',chr))
 print(dat.file)
 dat <- data.frame(A='M',Analysis=map$snp)
 write.table(dat,file=dat.file,row.name=FALSE,quote=FALSE,sep='\t')
 
 # read genotype ped file
-ped.file <- file.path(base.dir, 'genotypes', sprintf('merlin_%s.ped',chr))
-all.ped <- read.table(ped.file,header=FALSE)
+ped.file <- file.path(base.dir, 'all', sprintf('merlin_%s.ped',chr))
+all.ped <- read.table(ped.file,header=FALSE,colClasses='character')
 # set colnames
 colnames(all.ped)[1:6] <- c('fam','id','dad','mum','sex','affection')
 for (i in seq(1,2*(nrow(map)),2)) { colnames(all.ped)[(i+6):(i+7)] <- paste(map[ceiling(i/2),2],1:2,sep='.') }
@@ -102,13 +107,13 @@ print(genome.samples <- intersect(genome.samples,pedigree$ID))
 # genomes
 for (sample in genome.samples) {
     print(sample)
-    anno <- read(sprintf('/cluster/project8/vyp/pontikos/People/PetraLiskova/all/genomes/%s/%s_VEP_%s-annotations.csv',sample,sample,chr))
+    anno <- read(file.path(base.dir,'all','genomes',sprintf('%s/%s_VEP_%s-annotations.csv',sample,sample,chr)))
     #existing_variation <- strsplit( anno$Existing_variation, '&' )
     x <- as.data.frame(do.call('rbind', strsplit(anno$VARIANT_ID,'_')))
     colnames(x) <- c('chrom','pos','ref','alt')
     x$pos <- as.numeric(x$pos)
     anno <- cbind(anno,x)
-    geno <- read(file.path(base.dir,sprintf('/all/genomes/%s/%s_VEP_%s-genotypes.csv',sample,sample,chr)))
+    geno <- read(file.path(base.dir, 'all','genomes', sprintf('%s/%s_VEP_%s-genotypes.csv',sample,sample,chr)))
     geno <- as.numeric(geno[,2])
     ped <- rep(0,ncol(all.ped))
     names(ped) <- colnames(all.ped)
@@ -179,6 +184,7 @@ all.ped <- consistent.alleles(all.ped,genome.samples)
 
 # map file
 print(map.file <- file.path(sprintf('merlin_%s.map',chr)))
+map$cm <- map$cm-min(map$cm)
 write.table(map[,c('chr','snp','cm')],file=map.file,row.name=FALSE,quote=FALSE,sep='\t',col.name=FALSE)
 # dat file
 dat.file <- file.path(sprintf('merlin_%s.dat',chr))
@@ -193,13 +199,13 @@ write.csv(all.ped,file=gsub('.ped','.csv', final.ped.file),quote=FALSE,row.names
 exome.samples <- c("J2", "J3", "J5", "J6", "J8", "J9", "J10", "J11", "J12", "J13", "J14")
 print(exome.samples <- intersect(exome.samples,pedigree$ID))
 if (length(exome.samples)>0) {
-anno <- read(file.path(base.dir,sprintf('exomes/VEP_%s-annotations.csv',chr)))
+anno <- read(file.path(base.dir,sprintf('exomes','VEP_%s-annotations.csv',chr)))
 #existing_variation <- strsplit( anno$Existing_variation, '&' )
 x <- as.data.frame(do.call('rbind', strsplit(anno$VARIANT_ID,'_')))
 colnames(x) <- c('chrom','pos','ref','alt')
 x$pos <- as.numeric(x$pos)
 anno <- cbind(anno,x)
-geno <- read(file.path(base.dir,sprintf('exomes/VEP_%s-genotypes.csv',chr)))
+geno <- read(file.path(base.dir,'exomes',sprintf('VEP_%s-genotypes.csv',chr)))
 for (sample in exome.samples) {
     print(sample)
     ped <- rep(0,ncol(all.ped))
